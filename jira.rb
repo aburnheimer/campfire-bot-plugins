@@ -35,13 +35,13 @@ class Jira < CampfireBot::Plugin
   on_command 'checkjira', :checkjira_command
   on_command 'jira', :lookup_ticket
   on_command 'j',    :lookup_ticket
-  
+
   def initialize
     # log "initializing... "
     @bot_root = bot.config['bot_root'].nil? ? "/opt/campfire-bot" : \
         bot.config['bot_root']
     @data_file  = File.join(@bot_root, 'tmp', "jira-#{bot.environment_name}.yml")
-    @cached_ids =  YAML::load(File.read(@data_file)) rescue {}
+    @cached_ids = YAML::load(File.read(@data_file)) rescue {}
     @last_checked = @cached_ids[:last_checked] || 10.minutes.ago
     @log = Logging.logger["CampfireBot::Plugin::Jira"]
   end
@@ -58,12 +58,14 @@ class Jira < CampfireBot::Plugin
   end
 
   def lookup_ticket(msg)
-    tickets = msg[:message]
+    message = msg[:message]
+
+    tickets = message.scan(/[A-Za-z]+-[1-9][0-9]*/) # Array
 
     msg.speak("Will only lookup #{MAX_RESPONSES} issues or less at " +
-        "a time")  if tickets.split(' ').size >= MAX_RESPONSES
+        "a time")  if tickets.size >= MAX_RESPONSES
 
-    tickets.split(' ')[0..MAX_RESPONSES-1].each do |ticket|
+    tickets[0..MAX_RESPONSES-1].each do |ticket|
       begin
         @log.info "looking up #{ticket} for #{msg[:person]}"
         lookupurl_str = bot.config['jira_lookup_url'].gsub(/%s/, CGI.escape(ticket))
@@ -178,7 +180,7 @@ class Jira < CampfireBot::Plugin
     end
     return tix
   end
-
+  
   # extract array of comments from an xml element (ticket)
   def parse_ticket_for_comments(xml)
     comments = []
