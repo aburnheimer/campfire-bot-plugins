@@ -76,11 +76,15 @@ class GenericSearch < CampfireBot::Plugin
           initial_url = h['url'].gsub(/%s/, CGI.escape(msg[:message]))
           redir_url, response = http_peek(initial_url)
           @log.debug "peeked #{response}, url: #{redir_url}"
-          results = ml_scrape(response.read_body, redir_url,
-              h['result_xpath'], h['default_results'] || DEFAULT_RESULTS,
-              h['result_href_append'], h['result_filter'])
-          @log.debug "done, got #{results.count()} results from " +
-              "the #{h['result_xpath']} tag of #{response}"
+	  if initial_url.end_with?("json") or initial_url.end_with?("txt")
+            results = [ response.read_body ]
+	  else
+            results = ml_scrape(response.read_body, redir_url,
+                h['result_xpath'], h['default_results'] || DEFAULT_RESULTS,
+                h['result_href_append'], h['result_filter'])
+            @log.debug "done, got #{results.count()} results from " +
+                "the #{h['result_xpath']} tag of #{response}"
+	  end
 
           msg.speak(h['preface']) unless h['preface'].nil?
           results.each { |r|
