@@ -218,7 +218,7 @@ class GenericSearch < CampfireBot::Plugin
       @log.debug "result_xpath: #{result_xpath}"
       doc.search(result_xpath)[0..max_results-1].each do |link|
         @log.debug "to match on link: " + PP.singleline_pp(link, '')
-        if result_matcher.nil? or link.search(result_matcher)
+        if result_matcher.nil? or not link.search(result_matcher).empty?
           @log.debug "matched: " + PP.singleline_pp(result_matcher, '')
           # ...in case no 'href' attr. for tag
           result_href = link.content if result_filter
