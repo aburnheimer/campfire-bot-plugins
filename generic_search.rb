@@ -12,10 +12,10 @@ include ActionView::Helpers::TextHelper
 #
 # You configure the command name and URL pattern.  Given a search
 # term, it attempts to respond with the URL of the first search
-# result.  It does so by simply inserting the term into the URL at the
-# '%s'.  If the url redirects, it responds with the redirect target
-# instead, so you get a hint about what you'll see.  Otherwise, you
-# get just the expanded url pattern.
+# result.  It does so by simply inserting the term into the URL or 
+# result_matcher xpath at the '%s'.  If the url redirects, it responds
+# with the redirect target instead, so you get a hint about what you'll
+# see.  Otherwise, you get just the expanded url pattern.
 #
 # This is useful for a wide range of sites or services.  Sample config:
 #
@@ -36,10 +36,20 @@ include ActionView::Helpers::TextHelper
 #     max_results: 1
 #     result_href_append: ?schema=5
 #     result_filter: .*/(\d+)
+#   smooth:
+#     url: "http://ccpplt-po-a194-p.po.ccp.cable.comcast.com/omg_usage/smooth.xml"
+#     result_xpath: entry
+#     result_matcher: title[string()='omg0%s']
+#     # matches are made against xpath entry/title[string()='omg0%s']
 #   php: "http://us3.php.net/manual-lookup.php?pattern=%s&lang=en"
 #   letmegooglethatforyou: "http://letmegooglethatforyou.com/?q=%s"
 #
 # Note that the last site never redirects, which is fine.
+#
+# result_matcher (optional) When the supplied xpaths return more than
+#   one result and only one is desired, result_matcher may be specified 
+#   to restrict the results.  result_matcher must be a sub-path to the
+#   result_xpath(s)
 #
 # max_results (optional) to return for requests.  Will be set to the
 #   plugin's default value if omitted.
@@ -47,8 +57,9 @@ include ActionView::Helpers::TextHelper
 # result_href_append (optional) is added to the end of result link
 #   references (URL)
 #
-# result_filter (optional) is applied to result contents to extract
-#   only pertinent information.
+# result_filter (optional) is applied as a filter to result contents to
+#   extract only pertinent information. The centent text will be by 
+#   way of 'result_filter'.
 #
 # more_results_subs (optional) changes the URL linking to the full
 #   search results to make a query that's more useful for the user.
@@ -76,12 +87,13 @@ class GenericSearch < CampfireBot::Plugin
           initial_url = h['url'].gsub(/%s/, CGI.escape(msg[:message]))
           redir_url, response = http_peek(initial_url)
           @log.debug "peeked #{response}, url: #{redir_url}"
+          substituted_result_matcher = h['result_matcher'].gsub(/%s/, msg[:message])
 	  if initial_url.end_with?("json") or initial_url.end_with?("txt")
             results = [ response.read_body ]
 	  else
             results = ml_scrape(response.read_body, redir_url,
                 h['result_xpath'], h['default_results'] || DEFAULT_RESULTS,
-                h['result_href_append'], h['result_filter'])
+                h['result_href_append'], h['result_filter'], substituted_result_matcher)
             @log.debug "done, got #{results.count()} results from " +
                 "the #{h['result_xpath']} tag of #{response}"
 	  end
@@ -183,11 +195,12 @@ class GenericSearch < CampfireBot::Plugin
 
   # Parse the passed-in 'body_ml' markup string that has (presumably)
   # come from 'url' and provide back the contents of specific nodes of
-  # the html/xml per each of 'result_xpaths'.  The centent text will be
-  # filtered by way of 'result_filter', and 'res_href_append' will be
-  # added to the end of resulting link URLs.
+  # the html/xml per each of 'result_xpaths' each of which tested 
+  # against result_matcher.  The centent text will be filtered by way 
+  # of 'result_filter', and 'res_href_append' will be added to the end
+  # of resulting link URLs.
   def ml_scrape(body_ml, url, result_xpaths, max_results = nil, 
-      res_href_append = nil, result_filter = nil)
+      res_href_append = nil, result_filter = nil, result_matcher = nil)
 
     result_xpaths = [ result_xpaths ] unless result_xpaths.class == Array
     max_results = MAX_RESULTS if max_results > MAX_RESULTS
@@ -201,37 +214,42 @@ class GenericSearch < CampfireBot::Plugin
     result_xpaths.each do |result_xpath|
       @log.debug "result_xpath: #{result_xpath}"
       doc.search(result_xpath)[0..max_results-1].each do |link|
-        @log.debug "link: " + PP.singleline_pp(link, '')
+        @log.debug "to match on link: " + PP.singleline_pp(link, '')
+        if result_matcher.nil? or link.search(result_matcher)
+          @log.debug "matched: " + PP.singleline_pp(result_matcher, '')
+          # ...in case no 'href' attr. for tag
+          result_href = link.content if result_filter
 
-        # ...in case no 'href' attr. for tag
-        result_href = link.content if result_filter
+          if link['href'] && link['href'].start_with?("/")
+            uri = Addressable::URI.parse url
+            result_href = uri.omit(:user, :password) + link['href']
 
-        if link['href'] && link['href'].start_with?("/")
-          uri = Addressable::URI.parse url
-          result_href = uri.omit(:user, :password) + link['href']
+          elsif link['href']
+            result_href = link['href']
+          end
 
-        elsif link['href']
-          result_href = link['href']
+
+          if link.content == nil || link.content == ""
+            content = result_href
+          elsif link.element_children
+            content = link.element_children.first.content
+            link.element_children[1..-1].each { |c| content << ", #{c.content}" }
+          else
+            content = link.content
+          end
+
+          @log.debug "content: " + PP.singleline_pp(content, '')
+          if content && result_filter
+            content = CGI.unescape(content.gsub(Regexp.new(result_filter), 
+                '\1'))
+          end
+
+          @log.debug "content: #{content}, href+: " +
+              "#{result_href}#{res_href_append}"
+          ret.push("#{truncate(content, 
+              :length => CONTENT_MAX_LENGTH, :separator => ' ')} " +
+              "#{result_href}#{res_href_append}")
         end
-
-
-        if link.content == nil || link.content == ""
-          content = result_href
-        else
-          content = link.content
-        end
-
-        @log.debug "content: " + PP.singleline_pp(content, '')
-        if content && result_filter
-          content = CGI.unescape(content.gsub(Regexp.new(result_filter), 
-              '\1'))
-        end
-
-        @log.debug "content: #{content}, href+: " +
-            "#{result_href}#{res_href_append}"
-        ret.push("#{truncate(content, 
-            :length => CONTENT_MAX_LENGTH, :separator => ' ')} " +
-            "#{result_href}#{res_href_append}")
       end
     end
 
