@@ -41,6 +41,7 @@ include ActionView::Helpers::TextHelper
 #     result_xpath: entry
 #     result_matcher: title[string()='omg0%s']
 #     # matches are made against xpath entry/title[string()='omg0%s']
+#     content_max_length: 256
 #   php: "http://us3.php.net/manual-lookup.php?pattern=%s&lang=en"
 #   letmegooglethatforyou: "http://letmegooglethatforyou.com/?q=%s"
 #
@@ -93,7 +94,8 @@ class GenericSearch < CampfireBot::Plugin
 	  else
             results = ml_scrape(response.read_body, redir_url,
                 h['result_xpath'], h['default_results'] || DEFAULT_RESULTS,
-                h['result_href_append'], h['result_filter'], substituted_result_matcher)
+                h['result_href_append'], h['result_filter'], 
+                substituted_result_matcher, h['content_max_length'])
             @log.debug "done, got #{results.count()} results from " +
                 "the #{h['result_xpath']} tag of #{response}"
 	  end
@@ -197,10 +199,11 @@ class GenericSearch < CampfireBot::Plugin
   # come from 'url' and provide back the contents of specific nodes of
   # the html/xml per each of 'result_xpaths' each of which tested 
   # against result_matcher.  The centent text will be filtered by way 
-  # of 'result_filter', and 'res_href_append' will be added to the end
-  # of resulting link URLs.
+  # of 'result_filter', limited by 'content_max_length', and 
+  # 'res_href_append' will be added to the end of resulting link URLs.
   def ml_scrape(body_ml, url, result_xpaths, max_results = nil, 
-      res_href_append = nil, result_filter = nil, result_matcher = nil)
+      res_href_append = nil, result_filter = nil, result_matcher = nil, 
+      content_max_length = nil)
 
     result_xpaths = [ result_xpaths ] unless result_xpaths.class == Array
     max_results = MAX_RESULTS if max_results > MAX_RESULTS
@@ -246,9 +249,9 @@ class GenericSearch < CampfireBot::Plugin
 
           @log.debug "content: #{content}, href+: " +
               "#{result_href}#{res_href_append}"
-          ret.push("#{truncate(content, 
-              :length => CONTENT_MAX_LENGTH, :separator => ' ')} " +
-              "#{result_href}#{res_href_append}")
+          ret.push("#{truncate(content,
+              :length => content_max_length || CONTENT_MAX_LENGTH,
+              :separator => ' ')} " + "#{result_href}#{res_href_append}")
         end
       end
     end
