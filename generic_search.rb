@@ -88,7 +88,10 @@ class GenericSearch < CampfireBot::Plugin
           initial_url = h['url'].gsub(/%s/, CGI.escape(msg[:message]))
           redir_url, response = http_peek(initial_url)
           @log.debug "peeked #{response}, url: #{redir_url}"
-          substituted_result_matcher = h['result_matcher'].gsub(/%s/, msg[:message])
+          if h['result_matcher']
+            substituted_result_matcher = h['result_matcher'].gsub(/%s/, msg[:message])
+          end
+
 	  if initial_url.end_with?("json") or initial_url.end_with?("txt")
             results = [ response.read_body ]
 	  else
@@ -236,7 +239,7 @@ class GenericSearch < CampfireBot::Plugin
 
             if link.content == nil || link.content == ""
               content = result_href
-            elsif link.element_children
+            elsif not link.element_children.empty?
               content = link.element_children.first.content
               link.element_children[1..-1].each { |c| content << ", #{c.content}" }
             else
