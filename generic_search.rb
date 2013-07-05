@@ -216,42 +216,46 @@ class GenericSearch < CampfireBot::Plugin
     doc = Nokogiri.parse(body_ml)
     result_xpaths.each do |result_xpath|
       @log.debug "result_xpath: #{result_xpath}"
-      doc.search(result_xpath)[0..max_results-1].each do |link|
+      counter = max_results
+      doc.search(result_xpath).each do |link|
         @log.debug "to match on link: " + PP.singleline_pp(link, '')
         if result_matcher.nil? or not link.search(result_matcher).empty?
-          @log.debug "matched: " + PP.singleline_pp(result_matcher, '')
-          # ...in case no 'href' attr. for tag
-          result_href = link.content if result_filter
+          if counter > 0
+            @log.debug "matched: " + PP.singleline_pp(result_matcher, '')
+            # ...in case no 'href' attr. for tag
+            result_href = link.content if result_filter
 
-          if link['href'] && link['href'].start_with?("/")
-            uri = Addressable::URI.parse url
-            result_href = uri.omit(:user, :password) + link['href']
+            if link['href'] && link['href'].start_with?("/")
+              uri = Addressable::URI.parse url
+              result_href = uri.omit(:user, :password) + link['href']
 
-          elsif link['href']
-            result_href = link['href']
+            elsif link['href']
+              result_href = link['href']
+            end
+
+
+            if link.content == nil || link.content == ""
+              content = result_href
+            elsif link.element_children
+              content = link.element_children.first.content
+              link.element_children[1..-1].each { |c| content << ", #{c.content}" }
+            else
+              content = link.content
+            end
+
+            @log.debug "content: " + PP.singleline_pp(content, '')
+            if content && result_filter
+              content = CGI.unescape(content.gsub(Regexp.new(result_filter), 
+                  '\1'))
+            end
+
+            @log.debug "counter: #{counter}, content: #{content}, href+: " +
+                "#{result_href}#{res_href_append}"
+            ret.push("#{truncate(content,
+                :length => content_max_length || CONTENT_MAX_LENGTH,
+                :separator => ' ')} " + "#{result_href}#{res_href_append}")
+            counter -= 1
           end
-
-
-          if link.content == nil || link.content == ""
-            content = result_href
-          elsif link.element_children
-            content = link.element_children.first.content
-            link.element_children[1..-1].each { |c| content << ", #{c.content}" }
-          else
-            content = link.content
-          end
-
-          @log.debug "content: " + PP.singleline_pp(content, '')
-          if content && result_filter
-            content = CGI.unescape(content.gsub(Regexp.new(result_filter), 
-                '\1'))
-          end
-
-          @log.debug "content: #{content}, href+: " +
-              "#{result_href}#{res_href_append}"
-          ret.push("#{truncate(content,
-              :length => content_max_length || CONTENT_MAX_LENGTH,
-              :separator => ' ')} " + "#{result_href}#{res_href_append}")
         end
       end
     end
