@@ -92,20 +92,28 @@ class GenericSearch < CampfireBot::Plugin
             substituted_result_matcher = h['result_matcher'].gsub(/%s/, msg[:message])
           end
 
-	  if initial_url.end_with?("json") or initial_url.end_with?("txt")
-            results = [ response.read_body ]
-	  else
-            results = ml_scrape(response.read_body, redir_url,
-                h['result_xpath'], h['default_results'] || DEFAULT_RESULTS,
-                h['result_href_append'], h['result_filter'], 
-                substituted_result_matcher, h['content_max_length'])
-            @log.debug "done, got #{results.count()} results from " +
-                "the #{h['result_xpath']} tag of #{response}"
-	  end
+          if ! response.nil?
+            if initial_url.end_with?("json") or initial_url.end_with?("txt")
+              results = [ response.read_body ]
+            else
+              results = ml_scrape(response.read_body, redir_url,
+                  h['result_xpath'], h['default_results'] || DEFAULT_RESULTS,
+                  h['result_href_append'], h['result_filter'], 
+                  substituted_result_matcher, h['content_max_length'])
+              @log.debug "done, got #{results.count()} results from " +
+                  "the #{h['result_xpath']} tag of #{response}"
+            end
+          else
+            results = [ %Q|. . . Empty result. Look for errors in bot logs . . .| ]
+          end
 
           msg.speak(h['preface']) unless h['preface'].nil?
           results.each { |r|
-            msg.speak(r)
+            if r.include?("\n")
+              msg.paste(r)
+            else
+              msg.speak(r)
+            end
           }
           redir_uri = Addressable::URI.parse redir_url
           obfus_uri = redir_uri.omit(:user, :password)
@@ -193,7 +201,7 @@ class GenericSearch < CampfireBot::Plugin
       [res.header['Location'], res]
 
     else # Net::HTTPSuccess or error
-      @log.debug "proper location... res: #{res}, uri: #{uri.omit(:user, :password)}"
+      @log.debug "proper non-redirected location... res: #{res}, uri: #{uri.omit(:user, :password)}"
       [url, res]
     end
   end
