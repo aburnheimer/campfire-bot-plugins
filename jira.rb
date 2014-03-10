@@ -66,43 +66,63 @@ class Jira < CampfireBot::Plugin
         "a time")  if tickets.size >= MAX_RESPONSES
 
     tickets[0..MAX_RESPONSES-1].each do |ticket|
-      begin
-        @log.info "looking up #{ticket} for #{msg[:person]}"
-        lookupurl_str = bot.config['jira_lookup_url'].gsub(/%s/, CGI.escape(ticket))
-        # lookupurl: "https://username:password@www.host.com/jira/si/jira.issueviews:issue-xml/%s/%s.xml"
-        lookupurl = Addressable::URI.parse(lookupurl_str)
-        @log.debug PP.singleline_pp(lookupurl.to_hash, '')
-        xmldata = open(lookupurl.omit(:user, :password), 
-          :http_basic_authentication=>[lookupurl.user, 
-          lookupurl.password]).read
-        doc = REXML::Document.new(xmldata)
-        raise Exception.new("response had no content") if doc.nil?
+      @log.info "looking up #{ticket} for #{msg[:person]}"
+      lookupurl_strs = bot.config['jira_lookup_url']
+      # lookupurl: "https://username:password@www.host.com/jira/si/jira.issueviews:issue-xml/%s/%s.xml"
 
-        tik = {}
+      lookupurl_strs = [ lookupurl_strs ] unless lookupurl_strs.class == Array
 
-        doc.elements.inject('rss/channel/item', tik) do |tik, element|
-          tik = parse_ticket_info(element)
-          #comments = parse_ticket_for_comments(element)
+      doc = REXML::Document.new
+      lookupurl_strs.each_with_index do |lookupurl_str_tmpl, lookupurl_str_tmpl_idx|
+        lookupurl_str = lookupurl_str_tmpl.clone.gsub(/%s/, CGI.escape(ticket))
+
+        begin
+          lookupurl = Addressable::URI.parse(lookupurl_str)
+          @log.debug PP.singleline_pp(lookupurl.to_hash, '')
+          xmldata = open(lookupurl.omit(:user, :password),
+            :http_basic_authentication=>[lookupurl.user,
+            lookupurl.password]).read
+          doc = REXML::Document.new(xmldata)
+          break unless doc.nil? # No need to try any other sites
+
+        rescue OpenURI::HTTPError
+          if ( lookupurl_str_tmpl_idx + 1 ) < lookupurl_strs.count
+            @log.info "#{ticket} not found at #{lookupurl.host}, to try next site."
+            next
+          else
+            @log.warn "#{ticket} not found at last site #{lookupurl.host}, giving up"
+            msg.speak "Sorry, I had trouble finding info on #{ticket}."
+            return
+          end
+
+        rescue Exception => e
+          @log.error "error connecting to jira: #{e.class}, #{e.message}, " +
+              "#{e.backtrace}"
+          msg.speak "Sorry, I had trouble finding info on #{ticket}."
+          # @log.error "#{e.backtrace}"
+          return
         end
-
-        @log.info "Examining #{tik[:title]}"
-
-        update_tm_t = time_from_jira_time_string(tik[:updated])
-
-        messagetext = "#{tik[:title]} - #{tik[:link]} - Type: " +
-            "#{tik[:type]} - reported by #{tik[:reporter]}, " +
-            "assigned to #{tik[:assignee]} - #{tik[:status]} " +
-            "#{tik[:priority]}, updated " +
-            "#{time_ago_in_words(update_tm_t)} ago"
-        msg.speak(messagetext)
-        @log.debug messagetext
-
-      rescue Exception => e
-        @log.error "error connecting to jira: #{e.message}, " +
-            "#{e.backtrace}"
-        msg.speak "Sorry, I had trouble finding info on #{ticket}."
-        # @log.error "#{e.backtrace}"
       end
+      raise Exception.new("response had no content after all sites looked-up") if doc.nil?
+
+      tik = {}
+      doc.elements.inject('rss/channel/item', tik) do |tik, element|
+        tik = parse_ticket_info(element)
+        #comments = parse_ticket_for_comments(element)
+      end
+
+      @log.info "Examining #{tik[:title]}"
+
+      update_tm_t = time_from_jira_time_string(tik[:updated])
+
+      messagetext = "#{tik[:title]} - #{tik[:link]} - Type: " +
+          "#{tik[:type]} - reported by #{tik[:reporter]}, " +
+          "assigned to #{tik[:assignee]} - #{tik[:status]} " +
+          "#{tik[:priority]}, updated " +
+          "#{time_ago_in_words(update_tm_t)} ago"
+      msg.speak(messagetext)
+      @log.debug messagetext
+
     end
   end
     
